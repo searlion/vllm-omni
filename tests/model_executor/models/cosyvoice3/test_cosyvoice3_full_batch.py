@@ -109,6 +109,26 @@ def test_packed_stream_noise_growth_preserves_prefix_and_global_rng():
 
 
 @hardware_test(res={"cuda": "H100"}, num_cards=1)
+def test_packed_stream_launch_uses_query_bound(monkeypatch):
+    """A long KV prefix must not inflate the chunk-causal query launch grid."""
+    from vllm_omni.model_executor.models.cosyvoice3.code2wav_core import packed_dit
+
+    bound = []
+
+    def forward(estimator, x, *args, max_seqlen_q, **kwargs):
+        bound.append(max_seqlen_q)
+        return x
+
+    monkeypatch.setattr(packed_dit, "forward_packed_tensor_geometry", forward)
+    estimator = object.__new__(packed_dit.PackedDiT)
+    rows = packed_dit.pack_rows([50], torch.device("cpu"))
+    attention = packed_dit.RaggedRowAttention(rows, heads=16, head_dim=64, chunk_size=50, width=4096)
+    hidden = torch.empty(1, 50, 80)
+    assert estimator.forward_full(hidden, None, None, None, None, None, attention) is hidden
+    assert bound == [50]
+
+
+@hardware_test(res={"cuda": "H100"}, num_cards=1)
 @torch.inference_mode()
 def test_packed_stream_attention_matches_chunk_causal_reference():
     if torch.cuda.get_device_capability()[0] != 9:
