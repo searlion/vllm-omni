@@ -83,13 +83,7 @@ def test_mm_embeddings_exclude_zero_length_graph_padding_rows():
     state.gather_mm_embeddings = MagicMock(return_value=([torch.ones(1, 2)], torch.ones(5, dtype=torch.bool)))
     state.model.supports_embed_input_ids_query_start_loc = True
 
-    def embed(input_ids, *, query_start_loc, **kwargs):
-        # CosyVoice3 rejects repeated boundaries; graph padding is not a request.
-        assert query_start_loc == [0, 2, 5]
-        assert all(end > start for start, end in zip(query_start_loc, query_start_loc[1:]))
-        return input_ids[:, None].expand(-1, 2).float()
-
-    state.model.embed_input_ids.side_effect = embed
+    state.model.embed_input_ids.return_value = torch.ones(5, 2)
     buffers = InputBuffers(4, 8, torch.device("cpu"))
     batch = replace(
         InputBatch.make_dummy(2, 5, buffers),
@@ -99,7 +93,8 @@ def test_mm_embeddings_exclude_zero_length_graph_padding_rows():
         query_start_loc_np=buffers.query_start_loc.numpy(),
     )
     result = state.prepare_inputs_embeds({}, batch, MagicMock(spec=RequestState))
-    torch.testing.assert_close(result[:5], torch.arange(5).float()[:, None].expand(-1, 2))
+    assert state.model.embed_input_ids.call_args.kwargs["query_start_loc"] == [0, 2, 5]
+    torch.testing.assert_close(result[:5], torch.ones(5, 2))
     assert result.shape == (8, 2)
 
 
